@@ -3,14 +3,171 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="theme-color" content="#1a9e72">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="HealthBuddy AI">
-<meta name="description" content="Your personal AI health assistant — symptom checker, medication reminders and health tracking 24/7">
-<link rel="manifest" href="/manifest.json">
-<link rel="apple-touch-icon" href="/icon-192.png">
 <title>HealthBuddy AI</title>
+<script type="module">
+  import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+  import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, sendPasswordResetEmail } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+  import { getFirestore, doc, setDoc, getDoc, updateDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyDBo-1N4pJG0ptTQGUsvNMkuuQJQO_721c",
+    authDomain: "healthbuddy-ai-6f07f.firebaseapp.com",
+    projectId: "healthbuddy-ai-6f07f",
+    storageBucket: "healthbuddy-ai-6f07f.firebasestorage.app",
+    messagingSenderId: "133373200021",
+    appId: "1:133373200021:web:12efa4863f2947c95bbd9c"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+  const googleProvider = new GoogleAuthProvider();
+
+  // Make auth functions globally available
+  window.fbAuth = auth;
+  window.fbDb = db;
+  window.fbGoogleProvider = googleProvider;
+  window.fbCreateUser = createUserWithEmailAndPassword;
+  window.fbSignIn = signInWithEmailAndPassword;
+  window.fbSignInWithPopup = signInWithPopup;
+  window.fbSignOut = signOut;
+  window.fbOnAuthStateChanged = onAuthStateChanged;
+  window.fbResetPassword = sendPasswordResetEmail;
+  window.fbDoc = doc;
+  window.fbSetDoc = setDoc;
+  window.fbGetDoc = getDoc;
+  window.fbUpdateDoc = updateDoc;
+  window.fbServerTimestamp = serverTimestamp;
+
+  // Auth state listener
+  onAuthStateChanged(auth, async (user) => {
+    if (user) {
+      window.currentUser = user;
+      // Load user profile
+      try {
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        if (userDoc.exists()) {
+          window.userProfile = userDoc.data();
+          const name = window.userProfile.name || user.displayName || 'User';
+          const el = document.getElementById('userName');
+          if (el) el.textContent = name;
+          // Update premium badge
+          const badge = document.getElementById('premiumBadge');
+          if (badge) badge.textContent = window.userProfile.isPremium ? '⭐ Premium' : 'Free Plan';
+        } else {
+          // Create user doc
+          const name = user.displayName || user.email.split('@')[0];
+          await setDoc(doc(db, 'users', user.uid), {
+            name: name,
+            email: user.email,
+            isPremium: false,
+            createdAt: serverTimestamp(),
+            checksToday: 0,
+            totalChecks: 0,
+            streakDays: 0
+          });
+          window.userProfile = { name, isPremium: false };
+          const el = document.getElementById('userName');
+          if (el) el.textContent = name;
+        }
+      } catch(e) { console.log('Profile load error:', e); }
+      // Show main app
+      document.getElementById('screen-auth').classList.remove('active');
+      document.getElementById('screen-auth').style.display = 'none';
+      goTo('home');
+    } else {
+      window.currentUser = null;
+      window.userProfile = null;
+      // Show auth screen
+      document.querySelectorAll('.screen').forEach(s => {
+        s.classList.remove('active');
+        s.style.display = 'none';
+      });
+      const authScreen = document.getElementById('screen-auth');
+      authScreen.style.display = 'flex';
+      authScreen.classList.add('active');
+    }
+  });
+
+  // Register
+  window.doRegister = async function() {
+    const name = document.getElementById('regName').value.trim();
+    const email = document.getElementById('regEmail').value.trim();
+    const pass = document.getElementById('regPass').value;
+    const confirmPass = document.getElementById('regConfirm').value;
+    const errEl = document.getElementById('authErrorReg');
+
+    if (!name || !email || !pass) { errEl.textContent = 'Please fill all fields.'; return; }
+    if (pass !== confirmPass) { errEl.textContent = 'Passwords do not match.'; return; }
+    if (pass.length < 6) { errEl.textContent = 'Password must be at least 6 characters.'; return; }
+
+    errEl.textContent = '';
+    document.getElementById('authSubmitBtnReg').textContent = 'Creating account...';
+
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, email, pass);
+      await setDoc(doc(db, 'users', cred.user.uid), {
+        name, email, isPremium: false,
+        createdAt: serverTimestamp(),
+        checksToday: 0, totalChecks: 0, streakDays: 0
+      });
+    } catch(e) {
+      document.getElementById('authSubmitBtnReg').textContent = 'Create Account';
+      if (e.code === 'auth/email-already-in-use') errEl.textContent = 'Email already registered. Please login.';
+      else if (e.code === 'auth/invalid-email') errEl.textContent = 'Invalid email address.';
+      else errEl.textContent = 'Error: ' + e.message;
+    }
+  };
+
+  // Login
+  window.doLogin = async function() {
+    const email = document.getElementById('loginEmail').value.trim();
+    const pass = document.getElementById('loginPass').value;
+    const errEl = document.getElementById('authError');
+
+    if (!email || !pass) { errEl.textContent = 'Please enter email and password.'; return; }
+    errEl.textContent = '';
+    document.getElementById('authSubmitBtn').textContent = 'Logging in...';
+
+    try {
+      await signInWithEmailAndPassword(auth, email, pass);
+    } catch(e) {
+      document.getElementById('authSubmitBtn').textContent = 'Login';
+      if (e.code === 'auth/invalid-credential') errEl.textContent = 'Wrong email or password.';
+      else errEl.textContent = 'Error: ' + e.message;
+    }
+  };
+
+  // Google Sign In
+  window.doGoogleSignIn = async function() {
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch(e) {
+      document.getElementById('authError').textContent = 'Google sign-in failed. Try again.';
+    }
+  };
+
+  // Logout
+  window.doLogout = async function() {
+    if (confirm('Are you sure you want to logout?')) {
+      await signOut(auth);
+    }
+  };
+
+  // Reset Password
+  window.doResetPassword = async function() {
+    const email = document.getElementById('loginEmail').value.trim();
+    if (!email) { document.getElementById('authError').textContent = 'Enter your email first.'; return; }
+    try {
+      await sendPasswordResetEmail(auth, email);
+      document.getElementById('authError').style.color = '#1a9e72';
+      document.getElementById('authError').textContent = 'Reset email sent! Check your inbox.';
+    } catch(e) {
+      document.getElementById('authError').textContent = 'Error sending reset email.';
+    }
+  };
+</script>
+
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -708,6 +865,181 @@ body {
 .modal-btn:hover { background: var(--green-dark); }
 
 /* LOADER */
+
+/* ===== AUTH SCREEN ===== */
+#screen-auth {
+  background: linear-gradient(160deg, #0d6b4d 0%, #1a9e72 60%, #22c98e 100%);
+  justify-content: center;
+  align-items: center;
+  padding: 40px 24px;
+  min-height: 100vh;
+  display: none;
+}
+
+.auth-card {
+  background: #fff;
+  border-radius: 28px;
+  padding: 32px 28px;
+  width: 100%;
+  max-width: 380px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+}
+
+.auth-logo {
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.auth-logo-icon {
+  width: 64px; height: 64px;
+  background: var(--green-light);
+  border-radius: 18px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 30px;
+  margin: 0 auto 12px;
+}
+
+.auth-title {
+  font-family: 'DM Serif Display', serif;
+  font-size: 26px;
+  color: var(--text);
+  text-align: center;
+  margin-bottom: 4px;
+}
+
+.auth-sub {
+  font-size: 13px;
+  color: var(--muted);
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.auth-tabs {
+  display: flex;
+  background: var(--bg);
+  border-radius: 12px;
+  padding: 4px;
+  margin-bottom: 24px;
+  gap: 4px;
+}
+
+.auth-tab {
+  flex: 1;
+  padding: 10px;
+  border: none;
+  background: none;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--muted);
+  font-family: 'DM Sans', sans-serif;
+  transition: all 0.2s;
+}
+
+.auth-tab.active {
+  background: #fff;
+  color: var(--green-dark);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+
+.auth-form { display: flex; flex-direction: column; gap: 12px; }
+
+.auth-input {
+  width: 100%;
+  background: var(--bg);
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  padding: 13px 16px;
+  font-size: 14px;
+  font-family: 'DM Sans', sans-serif;
+  outline: none;
+  color: var(--text);
+  transition: border-color 0.2s;
+}
+
+.auth-input:focus { border-color: var(--green); }
+.auth-input::placeholder { color: var(--muted); }
+
+.auth-btn {
+  width: 100%;
+  background: var(--green);
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  padding: 15px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'DM Sans', sans-serif;
+  transition: all 0.2s;
+  margin-top: 4px;
+}
+
+.auth-btn:hover { background: var(--green-dark); }
+
+.auth-google-btn {
+  width: 100%;
+  background: #fff;
+  color: var(--text);
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  padding: 13px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: 'DM Sans', sans-serif;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.auth-google-btn:hover { border-color: var(--green); background: var(--green-light); }
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  margin: 4px 0;
+}
+
+.auth-divider::before, .auth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.auth-error {
+  font-size: 12px;
+  color: var(--red);
+  text-align: center;
+  min-height: 18px;
+}
+
+.auth-forgot {
+  font-size: 12px;
+  color: var(--green);
+  text-align: right;
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-family: 'DM Sans', sans-serif;
+  padding: 0;
+}
+
+.auth-disclaimer {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+  margin-top: 16px;
+  line-height: 1.5;
+}
+
 .loader {
   display: inline-block;
   width: 18px; height: 18px;
@@ -801,6 +1133,18 @@ body {
         <strong>Health Tracking</strong>
         Monitor your wellness over time
       </div>
+    </div>
+  </div>
+  <div id="apiKeySection" style="width:100%;margin-bottom:16px;">
+    <div style="background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2);border-radius:16px;padding:16px;">
+      <p style="color:rgba(255,255,255,0.9);font-size:13px;font-weight:500;margin-bottom:8px;">&#128273; Anthropic API Key <span style="font-weight:400;opacity:0.7;">(pentru AI live)</span></p>
+      <input id="apiKeyInput" type="password"
+        placeholder="sk-ant-api03-..."
+        style="width:100%;background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);border-radius:10px;padding:10px 14px;font-size:13px;color:#fff;outline:none;font-family:'DM Sans',sans-serif;"
+        oninput="checkApiKey()"
+      />
+      <p style="color:rgba(255,255,255,0.55);font-size:11px;margin-top:8px;line-height:1.5;">Obtii gratuit pe <strong style="color:rgba(255,255,255,0.8);">console.anthropic.com</strong> &rarr; API Keys &rarr; Create Key. Cheia ramane doar pe dispozitivul tau.</p>
+      <div id="apiStatus" style="margin-top:8px;font-size:12px;color:rgba(255,255,255,0.5);">Fara cheie &mdash; se foloseste AI offline</div>
     </div>
   </div>
   <button class="btn-primary" onclick="startApp()">Get Started &mdash; It's Free</button>
@@ -1087,6 +1431,14 @@ body {
         </div>
         <span class="profile-item-arrow">›</span>
       </div>
+      <div class="profile-item" onclick="doLogout()" style="border-color:#fee2e2;">
+        <div class="profile-item-icon" style="background:#fee2e2;">🚪</div>
+        <div class="profile-item-text">
+          <div class="profile-item-name" style="color:#991b1b;">Logout</div>
+          <div class="profile-item-sub">Sign out of your account</div>
+        </div>
+        <span class="profile-item-arrow" style="color:#991b1b;">›</span>
+      </div>
       <div class="profile-item" onclick="alert('Terms of Service & Privacy Policy\nHealthBuddy AI v1.0.0\n© 2026 HealthBuddy Inc.')">
         <div class="profile-item-icon pi-green">📄</div>
         <div class="profile-item-text">
@@ -1096,6 +1448,53 @@ body {
         <span class="profile-item-arrow">›</span>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- ===== AUTH SCREEN ===== -->
+<div id="screen-auth" class="screen" style="display:none;">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <div class="auth-logo-icon">🩺</div>
+      <h1 class="auth-title">HealthBuddy AI</h1>
+      <p class="auth-sub">Your personal AI health assistant</p>
+    </div>
+
+    <div class="auth-tabs">
+      <button class="auth-tab active" id="tab-login" onclick="switchAuthTab('login')">Login</button>
+      <button class="auth-tab" id="tab-register" onclick="switchAuthTab('register')">Register</button>
+    </div>
+
+    <!-- LOGIN FORM -->
+    <div id="form-login" class="auth-form">
+      <input class="auth-input" id="loginEmail" type="email" placeholder="Email address" />
+      <input class="auth-input" id="loginPass" type="password" placeholder="Password" />
+      <button class="auth-forgot" onclick="doResetPassword()">Forgot password?</button>
+      <div id="authError" class="auth-error"></div>
+      <button class="auth-btn" id="authSubmitBtn" onclick="doLogin()">Login</button>
+      <div class="auth-divider">or</div>
+      <button class="auth-google-btn" onclick="doGoogleSignIn()">
+        <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20H24v8h11.3C33.7 32.8 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.1 8 2.9l5.7-5.7C34.1 6.5 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20c11 0 20-8 20-20 0-1.3-.2-2.7-.4-4z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.5 16 18.9 13 24 13c3.1 0 5.8 1.1 8 2.9l5.7-5.7C34.1 6.5 29.3 4 24 4c-7.7 0-14.4 4.4-17.7 10.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-1.9 13.4-4.9l-6.2-5.2C29.3 35.6 26.8 36 24 36c-5.2 0-9.7-3.2-11.3-7.8l-6.5 5C9.7 39.7 16.4 44 24 44z"/><path fill="#1976D2" d="M43.6 20H24v8h11.3c-.8 2.3-2.3 4.2-4.2 5.6l6.2 5.2C40.9 35.5 44 30.2 44 24c0-1.3-.2-2.7-.4-4z"/></svg>
+        Continue with Google
+      </button>
+    </div>
+
+    <!-- REGISTER FORM -->
+    <div id="form-register" class="auth-form" style="display:none;">
+      <input class="auth-input" id="regName" type="text" placeholder="Full name" />
+      <input class="auth-input" id="regEmail" type="email" placeholder="Email address" />
+      <input class="auth-input" id="regPass" type="password" placeholder="Password (min 6 characters)" />
+      <input class="auth-input" id="regConfirm" type="password" placeholder="Confirm password" />
+      <div id="authErrorReg" class="auth-error"></div>
+      <button class="auth-btn" id="authSubmitBtnReg" onclick="doRegister()">Create Account</button>
+      <div class="auth-divider">or</div>
+      <button class="auth-google-btn" onclick="doGoogleSignIn()">
+        <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20H24v8h11.3C33.7 32.8 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.1 8 2.9l5.7-5.7C34.1 6.5 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20c11 0 20-8 20-20 0-1.3-.2-2.7-.4-4z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.5 16 18.9 13 24 13c3.1 0 5.8 1.1 8 2.9l5.7-5.7C34.1 6.5 29.3 4 24 4c-7.7 0-14.4 4.4-17.7 10.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-1.9 13.4-4.9l-6.2-5.2C29.3 35.6 26.8 36 24 36c-5.2 0-9.7-3.2-11.3-7.8l-6.5 5C9.7 39.7 16.4 44 24 44z"/><path fill="#1976D2" d="M43.6 20H24v8h11.3c-.8 2.3-2.3 4.2-4.2 5.6l6.2 5.2C40.9 35.5 44 30.2 44 24c0-1.3-.2-2.7-.4-4z"/></svg>
+        Continue with Google
+      </button>
+    </div>
+
+    <p class="auth-disclaimer">By continuing you agree to our Terms of Service and Privacy Policy. HealthBuddy AI is not a substitute for professional medical advice.</p>
   </div>
 </div>
 
@@ -1151,16 +1550,41 @@ const ANTHROPIC_KEY_PLACEHOLDER = "YOUR_ANTHROPIC_API_KEY";
 
 const screens = ['home','checker','meds','profile'];
 
+function switchAuthTab(tab) {
+  document.getElementById('form-login').style.display = tab === 'login' ? 'flex' : 'none';
+  document.getElementById('form-register').style.display = tab === 'register' ? 'flex' : 'none';
+  document.getElementById('tab-login').classList.toggle('active', tab === 'login');
+  document.getElementById('tab-register').classList.toggle('active', tab === 'register');
+  // Reset error and button
+  const errLogin = document.getElementById('authError');
+  const errReg = document.getElementById('authErrorReg');
+  if(errLogin) { errLogin.textContent = ''; errLogin.style.color = '#ef4444'; }
+  if(errReg) { errReg.textContent = ''; errReg.style.color = '#ef4444'; }
+}
+
 function goTo(screen) {
   screens.forEach(s => {
-    document.getElementById('screen-'+s).classList.remove('active');
+    const el = document.getElementById('screen-'+s);
+    el.classList.remove('active');
+    el.style.display = 'none';
     const nav = document.getElementById('nav-'+s);
     if(nav) nav.classList.remove('active');
   });
   document.getElementById('screen-'+screen).classList.add('active');
+  document.getElementById('screen-'+screen).style.display = 'flex';
   const nav = document.getElementById('nav-'+screen);
   if(nav) nav.classList.add('active');
   window.scrollTo(0,0);
+  // Update profile screen if navigating there
+  if (screen === 'profile' && window.currentUser) {
+    const name = (window.userProfile && window.userProfile.name) || window.currentUser.displayName || 'User';
+    const el = document.getElementById('profileName');
+    const emailEl = document.getElementById('profileEmail');
+    const nameEl = document.getElementById('userName');
+    if (el) el.textContent = name;
+    if (emailEl) emailEl.textContent = window.currentUser.email;
+    if (nameEl) nameEl.textContent = name;
+  }
 }
 
 function toggleCheck(el) {
@@ -1336,8 +1760,29 @@ function getAIResponse(userText) {
   return 'I\'m here to help! Could you describe what symptoms you\'re experiencing?\n\nFor example: "I have a headache" or "am durere de cap" — I understand both English and Romanian! 😊';
 }
 
+var ANTHROPIC_KEY = '';
+
+function checkApiKey() {
+  var val = document.getElementById('apiKeyInput').value.trim();
+  var status = document.getElementById('apiStatus');
+  if (val.startsWith('sk-ant')) {
+    status.textContent = '✅ Cheie detectata — AI live activ!';
+    status.style.color = '#a7f3d0';
+  } else if (val.length > 5) {
+    status.textContent = '⚠️ Format invalid — incepe cu sk-ant...';
+    status.style.color = '#fcd34d';
+  } else {
+    status.textContent = 'Fara cheie — se foloseste AI offline';
+    status.style.color = 'rgba(255,255,255,0.5)';
+  }
+}
+
 function startApp() {
+  var val = document.getElementById('apiKeyInput').value.trim();
+  if (val.startsWith('sk-ant')) { ANTHROPIC_KEY = val; }
   goTo('home');
+  var badge = document.getElementById('aiBadge');
+  if (badge) badge.textContent = ANTHROPIC_KEY ? '🤖 AI Live' : '🤖 AI Offline';
 }
 
 async function sendMessage() {
@@ -1354,35 +1799,58 @@ async function sendMessage() {
   // Build messages array for API (full conversation history)
   chat.history.push({ role: 'user', content: text });
 
-  // ── SECURE backend call ─────────────────────────────────────────
-  try {
-    const resp = await fetch('/.netlify/functions/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        messages: chat.history.map(function(m) { return { role: m.role, content: m.content }; })
-      })
-    });
-    const data = await resp.json();
-    document.getElementById('typingIndicator').classList.remove('visible');
-    if (data.content && data.content[0] && data.content[0].text) {
-      const reply = data.content[0].text;
-      chat.history.push({ role: 'assistant', content: reply });
-      appendMessage('ai', reply);
-      const sym = detectSymptom(text);
-      if (sym && chat.history.length > 4) { chat.symptom = sym; showResultCard(sym); }
-    } else {
+  if (ANTHROPIC_KEY) {
+    // ── LIVE Claude API ──────────────────────────────────────────
+    try {
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': ANTHROPIC_KEY,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 600,
+          system: 'You are HealthBuddy AI, a compassionate health assistant. Help users understand their symptoms with empathy and clarity. Ask one clarifying question at a time (duration, then severity 1-10). Give practical home care advice. Always state clearly when to see a doctor or call 112. End every response with a one-line disclaimer. Keep replies under 5 sentences. Understand both English and Romanian.',
+          messages: chat.history.map(function(m) { return { role: m.role, content: m.content }; })
+        })
+      });
+      const data = await resp.json();
+      document.getElementById('typingIndicator').classList.remove('visible');
+      if (data.content && data.content[0] && data.content[0].text) {
+        const reply = data.content[0].text;
+        chat.history.push({ role: 'assistant', content: reply });
+        appendMessage('ai', reply);
+        // detect symptom for result card
+        const sym = detectSymptom(text);
+        if (sym && chat.history.length > 4) { chat.symptom = sym; showResultCard(sym); }
+      } else {
+        // API returned error — fall back
+        const reply = getAIResponse(text);
+        chat.history.push({ role: 'assistant', content: reply });
+        appendMessage('ai', reply);
+        if (chat.stage === 'advised' && chat.symptom) showResultCard(chat.symptom);
+      }
+    } catch(err) {
+      document.getElementById('typingIndicator').classList.remove('visible');
       const reply = getAIResponse(text);
       chat.history.push({ role: 'assistant', content: reply });
       appendMessage('ai', reply);
       if (chat.stage === 'advised' && chat.symptom) showResultCard(chat.symptom);
     }
-  } catch(err) {
-    document.getElementById('typingIndicator').classList.remove('visible');
-    const reply = getAIResponse(text);
-    chat.history.push({ role: 'assistant', content: reply });
-    appendMessage('ai', reply);
-    if (chat.stage === 'advised' && chat.symptom) showResultCard(chat.symptom);
+  } else {
+    // ── OFFLINE engine ────────────────────────────────────────────
+    setTimeout(function() {
+      document.getElementById('typingIndicator').classList.remove('visible');
+      const reply = getAIResponse(text);
+      chat.history.push({ role: 'assistant', content: reply });
+      appendMessage('ai', reply);
+      if (chat.stage === 'advised' && chat.symptom) showResultCard(chat.symptom);
+      scrollChat();
+    }, 900 + Math.random() * 500);
+    return;
   }
   scrollChat();
 }
@@ -1429,56 +1897,6 @@ function scrollChat() {
   const body = document.getElementById('checkerBody');
   setTimeout(function() { body.scrollTop = body.scrollHeight; }, 100);
 }
-
-// ── PWA Service Worker Registration ─────────────────────────────
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', function() {
-    navigator.serviceWorker.register('/sw.js').then(function(reg) {
-      console.log('SW registered:', reg.scope);
-    }).catch(function(err) {
-      console.log('SW error:', err);
-    });
-  });
-}
-
-// ── PWA Install Prompt ───────────────────────────────────────────
-var deferredPrompt;
-window.addEventListener('beforeinstallprompt', function(e) {
-  e.preventDefault();
-  deferredPrompt = e;
-  // Show install button after 30 seconds
-  setTimeout(function() {
-    var banner = document.getElementById('installBanner');
-    if (banner && deferredPrompt) banner.style.display = 'flex';
-  }, 30000);
-});
-
-document.addEventListener('DOMContentLoaded', function() {
-  var installBtn = document.getElementById('installBtn');
-  if (installBtn) {
-    installBtn.addEventListener('click', function() {
-      if (deferredPrompt) {
-        deferredPrompt.prompt();
-        deferredPrompt.userChoice.then(function() {
-          deferredPrompt = null;
-          document.getElementById('installBanner').style.display = 'none';
-        });
-      }
-    });
-  }
-});
 </script>
-
-<!-- PWA Install Banner -->
-<div id="installBanner" style="display:none;position:fixed;bottom:80px;left:50%;transform:translateX(-50%);width:calc(100% - 32px);max-width:388px;background:#1a9e72;border-radius:16px;padding:14px 16px;align-items:center;gap:12px;z-index:500;box-shadow:0 8px 24px rgba(0,0,0,0.2);">
-  <span style="font-size:24px;">📱</span>
-  <div style="flex:1;">
-    <div style="color:#fff;font-size:14px;font-weight:500;">Install HealthBuddy AI</div>
-    <div style="color:rgba(255,255,255,0.75);font-size:12px;">Add to home screen for best experience</div>
-  </div>
-  <button id="installBtn" style="background:#fff;color:#0d6b4d;border:none;border-radius:10px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;">Install</button>
-  <button onclick="document.getElementById('installBanner').style.display='none'" style="background:none;border:none;color:rgba(255,255,255,0.7);font-size:18px;cursor:pointer;padding:0 4px;">✕</button>
-</div>
-
 </body>
 </html>
